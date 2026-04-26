@@ -1,6 +1,6 @@
 {
   "name": "@curatedmcp/sentinel",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "CuratedMCP's local-first action firewall for MCP servers",
   "type": "module",
   "main": "./dist/index.js",
