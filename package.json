@@ -1,6 +1,6 @@
 {
   "name": "@curatedmcp/sentinel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CuratedMCP's local-first action firewall for MCP servers",
   "type": "module",
   "main": "./dist/index.js",
@@ -21,12 +21,26 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
+    "mcp-firewall",
+    "mcp-proxy",
     "security",
     "firewall",
     "policy",
+    "model-context-protocol",
+    "claude",
+    "claude-desktop",
+    "cursor",
+    "windsurf",
+    "ai-agent",
     "curatedmcp"
   ],
   "author": "CuratedMCP",
+  "homepage": "https://curatedmcp.com/sentinel",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/curatedmcp/sentinel"
+  },
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
