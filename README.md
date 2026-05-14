@@ -94,58 +94,102 @@ All data remains local by default:
 - **~/.sentinel/actions.db** — SQLite action log
 - **~/.sentinel/config.json** — Configuration
 
-No cloud sync happens without explicit opt-in (via `--key`).
+## Cloud Identity & Audit (Control Plane)
 
-## License Integration
+Connect Sentinel to your org's [CuratedMCP registry](https://curatedmcp.com/registry) to get:
 
-Sentinel integrates with CuratedMCP licensing for optional features:
+- **Per-agent identity** — each Sentinel instance registers a stable identity with your org
+- **JIT scoped tokens** — short-lived (1hr) credentials replace long-lived secrets in `.env` files
+- **Cloud audit log** — every tool call logged with `(agent, server, tool, argsHash, outcome)` — args stored as a hash only, no PII leaves your machine
+- **Cross-IDE enforcement** — same allowlist applies across Claude Code, Cursor, Windsurf, Copilot
+
+### Setup
 
 ```bash
-# Provide your CuratedMCP license key
-sentinel proxy --key cmcp_xxxx
+# 1. Create an API key in your CuratedMCP registry dashboard
+#    → https://curatedmcp.com/registry/<your-slug>/settings
+
+# 2. Set env vars (or use CLI flags)
+export CURATED_REGISTRY_KEY="cmcp_reg_..."
+export CURATED_REGISTRY_SLUG="acme-corp"
+
+# 3. Run Sentinel — it auto-registers on first start
+sentinel proxy -- npx @modelcontextprotocol/server-github
 ```
 
-### What's Included
+Or pass flags directly:
 
-- ✅ Local policy enforcement
-- ✅ Action logging & audit trail
-- ✅ Approval workflows
-- ✅ Local dashboard
+```bash
+sentinel proxy \
+  --registry-key cmcp_reg_... \
+  --registry-slug acme-corp \
+  -- npx @modelcontextprotocol/server-github
+```
 
-### Premium Features (with License)
+### Environment Variables
 
-- 📊 Cloud sync to CuratedMCP dashboard
-- 📧 Email alerts for blocked actions
-- 🔔 Slack/webhook notifications
-- 📈 Advanced analytics
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `CURATED_REGISTRY_KEY` | Yes* | — | API key from registry dashboard (`cmcp_reg_…`) |
+| `CURATED_REGISTRY_SLUG` | Yes* | — | Your org's slug, e.g. `acme-corp` |
+| `CURATED_REGISTRY_URL` | No | `https://curatedmcp.com` | Override for self-hosted control plane |
+| `CURATED_MACHINE_ID` | No | auto | Stable ID for this machine (used to derive agent fingerprint) |
 
-See [CuratedMCP Pricing](https://curatedmcp.com/pricing) for details.
+*Required only for cloud mode. Omit both to run in local-only mode.
 
-## Roadmap
+### How it works
 
-- [ ] Remote policy distribution
-- [ ] Team collaboration & approval chains
-- [ ] Cloud sync with encryption
-- [ ] Slack/webhook integrations
-- [ ] Advanced anomaly detection
-- [ ] Multi-MCP orchestration
+```
+Claude Code / Cursor / Windsurf
+    ↓
+Sentinel Proxy
+    ├── Local PolicyEngine  (always runs, fast)
+    │       ↓ BLOCK → throws immediately
+    │       ↓ ALLOW → continue
+    └── CuratedMCP Broker   (when CURATED_REGISTRY_KEY is set)
+            ├── POST /identity      → register machine on startup
+            ├── POST /jit-token     → get 1hr scoped token per server
+            ├── POST /jit-token/verify → verify before each tool call
+            └── POST /tool-invocations → log outcome (fire-and-forget)
+    ↓
+MCP Server
+```
+
+Local policy always takes precedence. If the broker is unreachable, Sentinel falls back to local-only mode automatically (fail-open).
+
+### What's Always Free
+
+- Local policy enforcement
+- SQLite action log
+- Approval workflows
+- Local dashboard
+
+### What Requires a Registry Plan
+
+- Cloud audit log (searchable, exportable)
+- Cross-IDE allowlist push
+- Per-agent identity & JIT tokens
+- SSO / RBAC for teams
+
+See [curatedmcp.com/registry](https://curatedmcp.com/registry) for pricing.
 
 ## Architecture
 
 ```
 Client (Claude, Cursor, etc.)
     ↓
-Sentinel Proxy ← Policy Engine
-    ↓
-MCP Server
+Sentinel Proxy ← Local PolicyEngine
+    ↓               ↕ (optional)
+MCP Server      CuratedMCP Control Plane
 ```
 
 Every `CallToolRequest` is:
 1. Intercepted by Sentinel
-2. Evaluated against policies
-3. Logged to SQLite
-4. Either allowed, blocked, or held for approval
-5. Forwarded to downstream server (if allowed)
+2. Evaluated against local policies (fast, offline)
+3. Verified against the cloud registry (when connected)
+4. Logged locally to SQLite + cloud audit log
+5. Either allowed, blocked, or held for approval
+6. Forwarded to downstream server (if allowed)
 
 ## License
 

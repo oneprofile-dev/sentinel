@@ -4,6 +4,7 @@ import { SentinelProxy } from "./proxy.js";
 import { PolicyEngine } from "./policy.js";
 import { ActionLogger } from "./logger.js";
 import { Dashboard } from "./dashboard.js";
+import { CuratedBroker } from "./broker.js";
 import { randomUUID } from "crypto";
 import path from "path";
 import fs from "fs";
@@ -27,15 +28,34 @@ program
   .option("--policy <path>", "policy file path", path.join(SENTINEL_DIR, "policy.json"))
   .option("--db <path>", "database path", path.join(SENTINEL_DIR, "actions.db"))
   .option("--port <port>", "dashboard port", "4242")
+  .option("--registry-key <key>", "CuratedMCP registry API key (or set CURATED_REGISTRY_KEY)")
+  .option("--registry-slug <slug>", "CuratedMCP org slug (or set CURATED_REGISTRY_SLUG)")
+  .option("--registry-url <url>", "CuratedMCP API base URL", "https://curatedmcp.com")
   .action((args, options) => {
     ensureConfig();
-    const proxy = new SentinelProxy(options.policy, options.db, args.join(" "));
+
+    // Build broker from flags → env vars → null (local-only mode)
+    const registryKey = options.registryKey ?? process.env.CURATED_REGISTRY_KEY;
+    const registrySlug = options.registrySlug ?? process.env.CURATED_REGISTRY_SLUG;
+    const broker = registryKey && registrySlug
+      ? new CuratedBroker({
+          registryUrl: options.registryUrl ?? process.env.CURATED_REGISTRY_URL ?? "https://curatedmcp.com",
+          registryKey,
+          registrySlug,
+        })
+      : null;
+
+    if (!broker) {
+      console.log("ℹ️  Running in local-only mode. Set CURATED_REGISTRY_KEY + CURATED_REGISTRY_SLUG to enable cloud identity & audit.");
+    }
+
+    const proxy = new SentinelProxy(options.policy, options.db, args.join(" "), broker);
     const dashboard = new Dashboard(
       new ActionLogger(options.db),
       new PolicyEngine(options.policy),
       parseInt(options.port)
     );
-    
+
     dashboard.start();
     proxy.start().catch(console.error);
   });

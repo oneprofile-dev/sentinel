@@ -1,35 +1,44 @@
 import { PolicyEngine } from "./policy.js";
 import { ActionLogger } from "./logger.js";
+import { CuratedBroker } from "./broker.js";
 import { ToolCallRequest, ActionLog } from "./types.js";
 import { randomUUID } from "crypto";
 
 /**
- * SentinelProxy intercepts MCP tool calls and evaluates them against policies.
- * This is a simplified implementation; production version would use proper MCP transport.
+ * SentinelProxy intercepts MCP tool calls, evaluates them against local policies,
+ * and optionally syncs identity + audit to the curatedmcp.com control plane.
  */
 export class SentinelProxy {
   private policyEngine: PolicyEngine;
   private actionLogger: ActionLogger;
   private downstreamCommand: string;
+  private broker: CuratedBroker | null;
 
   constructor(
     policyFilePath: string,
     dbPath: string,
-    downstreamCommand: string
+    downstreamCommand: string,
+    broker?: CuratedBroker | null
   ) {
     this.policyEngine = new PolicyEngine(policyFilePath);
     this.actionLogger = new ActionLogger(dbPath);
     this.downstreamCommand = downstreamCommand;
+    this.broker = broker ?? null;
   }
 
   /**
-   * Evaluate a tool call request against active policies
+   * Evaluate a tool call request against local policies and the cloud broker.
+   * Local policy always wins: a local BLOCK is never overridden by the broker.
+   * Broker verify is fail-open: if unreachable, the local decision stands.
    */
-  evaluateRequest(toolName: string, serverId: string, args: Record<string, unknown>) {
+  async evaluateRequest(
+    toolName: string,
+    serverId: string,
+    args: Record<string, unknown>
+  ) {
     const requestId = randomUUID();
     const timestamp = Date.now();
 
-    // Create tool call request
     const toolCall: ToolCallRequest = {
       id: requestId,
       serverId,
@@ -38,10 +47,9 @@ export class SentinelProxy {
       timestamp,
     };
 
-    // Evaluate against policy
+    // 1. Local policy evaluation (always runs)
     const decision = this.policyEngine.evaluateToolCall(toolCall);
 
-    // Log the action
     const log: ActionLog = {
       id: randomUUID(),
       requestId,
@@ -51,31 +59,75 @@ export class SentinelProxy {
       action: decision.action,
       severity: decision.severity,
       ruleId: decision.ruleId,
-      approvalStatus:
-        decision.action === "REQUIRE_APPROVAL" ? "PENDING" : "CLEARED",
+      approvalStatus: decision.action === "REQUIRE_APPROVAL" ? "PENDING" : "CLEARED",
       timestamp,
-      expiresAt: timestamp + 24 * 60 * 60 * 1000, // 24h retention
+      expiresAt: timestamp + 24 * 60 * 60 * 1000,
     };
 
     this.actionLogger.logAction(log);
 
     if (decision.action === "BLOCK") {
-      throw new Error(
-        `Tool call blocked by policy: ${decision.ruleId || "unknown"}`
-      );
+      // Log block to broker (fire-and-forget)
+      this.broker?.logInvocation({
+        serverSlug: serverId,
+        toolName,
+        args,
+        outcome: "BLOCKED",
+        blockReason: decision.ruleId ?? "local_policy",
+        latencyMs: Date.now() - timestamp,
+      });
+      throw new Error(`Tool call blocked by policy: ${decision.ruleId ?? "unknown"}`);
     }
 
     if (decision.action === "REQUIRE_APPROVAL") {
-      // In real implementation, would wait for approval via dashboard
       throw new Error(`Tool call requires approval: ${requestId}`);
     }
+
+    // 2. Cloud broker verify (only when connected; fail-open)
+    let jitTokenId: string | undefined;
+    if (this.broker) {
+      const jitToken = await this.broker.getJitToken(serverId);
+      if (jitToken) {
+        const verify = await this.broker.verify(jitToken, serverId, toolName);
+        if (!verify.allowed) {
+          this.broker.logInvocation({
+            serverSlug: serverId,
+            toolName,
+            args,
+            outcome: "BLOCKED",
+            blockReason: verify.reason ?? "broker_denied",
+            latencyMs: Date.now() - timestamp,
+          });
+          throw new Error(`Tool call denied by registry: ${verify.reason ?? "policy"}`);
+        }
+        jitTokenId = verify.jitTokenId;
+      }
+    }
+
+    // 3. Log allowed invocation to broker (fire-and-forget)
+    this.broker?.logInvocation({
+      serverSlug: serverId,
+      toolName,
+      args,
+      outcome: "ALLOWED",
+      latencyMs: Date.now() - timestamp,
+      jitTokenId,
+    });
 
     return { success: true, requestId, decision };
   }
 
   async start() {
-    // In production, this would spawn the downstream MCP server as a child process
-    // and set up proper stdio transport for MCP protocol
+    // Register with broker on startup (idempotent)
+    if (this.broker) {
+      const id = await this.broker.register(`Sentinel — ${this.downstreamCommand.split(" ")[0]}`);
+      if (id) {
+        console.log(`🔐 Connected to CuratedMCP registry (identity: ${id.slice(0, 8)}…)`);
+      } else {
+        console.warn("⚠️  CuratedMCP broker configured but registration failed — running in local-only mode");
+      }
+    }
+
     console.log(`🔗 Sentinel Proxy initialized for: ${this.downstreamCommand}`);
   }
 
