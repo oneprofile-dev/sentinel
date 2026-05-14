@@ -2,7 +2,9 @@
 
 **Local-first action firewall for MCP servers.**
 
-Sentinel is CuratedMCP's enforcement layer that intercepts MCP tool calls before execution, evaluates them against JSON policy rules, logs all actions locally in SQLite, and optionally requires approval before continuing.
+Sentinel intercepts MCP tool calls before execution, evaluates them against JSON policy rules, logs all actions locally in SQLite, and optionally requires approval before continuing.
+
+**No account or API key required.** Local mode works out of the box. Cloud identity and audit features are opt-in for teams using the [CuratedMCP Governance Control Plane](https://curatedmcp.com/registry).
 
 ## Installation
 
@@ -96,6 +98,8 @@ All data remains local by default:
 
 ## Cloud Identity & Audit (Control Plane)
 
+> **No key? No problem.** Sentinel runs fully offline with no configuration at all. Cloud mode is optional — skip this section if you just want local policy enforcement.
+
 Connect Sentinel to your org's [CuratedMCP registry](https://curatedmcp.com/registry) to get:
 
 - **Per-agent identity** — each Sentinel instance registers a stable identity with your org
@@ -103,11 +107,16 @@ Connect Sentinel to your org's [CuratedMCP registry](https://curatedmcp.com/regi
 - **Cloud audit log** — every tool call logged with `(agent, server, tool, argsHash, outcome)` — args stored as a hash only, no PII leaves your machine
 - **Cross-IDE enforcement** — same allowlist applies across Claude Code, Cursor, Windsurf, Copilot
 
+### Getting a Registry Key
+
+Email **admin@curatedmcp.com** to request access to the Control Plane, or visit [curatedmcp.com/registry](https://curatedmcp.com/registry) to sign up.
+
 ### Setup
 
 ```bash
-# 1. Create an API key in your CuratedMCP registry dashboard
+# 1. Get your API key from the CuratedMCP registry dashboard
 #    → https://curatedmcp.com/registry/<your-slug>/settings
+#    (or email admin@curatedmcp.com to request access)
 
 # 2. Set env vars (or use CLI flags)
 export CURATED_REGISTRY_KEY="cmcp_reg_..."
@@ -198,4 +207,4 @@ MIT
 ---
 
 **Made with ❤️ by CuratedMCP**  
-[Visit CuratedMCP](https://curatedmcp.com) | [Join Community](https://discord.gg/curatedmcp)
+[Visit CuratedMCP](https://curatedmcp.com) | [Join Community](https://discord.gg/curatedmcp) | Questions: admin@curatedmcp.com
